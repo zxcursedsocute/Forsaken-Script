@@ -1,0 +1,208 @@
+local a,b,c=...
+local d=game:GetService"HttpService"
+local e=false
+
+
+local f="http://zxccursed.temp.swtest.ru/Scripts/Save_config.php"
+local g=(syn and syn.request)or(http and http.request)or request
+
+
+local function notify(h,i,j,k)
+b:Notification{Name=h,Description=i,Type=j,Duration=k}
+end
+
+local function getCfgPath()
+return b.saveFolder.."/"..b.saveFileName
+end
+
+local function saveCfg()
+b:SaveConfig(b.saveFolder,b.saveFileName)
+end
+
+
+a:AddSection"Interface"
+a:AddDropdown{Name="Theme",Description="Change the interface theme",Options={'Two Time Femboy (by Mary)','Jane Doe (by Entity)',"Forest 2021","Cursed",'Darkness','Dark','White','Black'},Callback=function(h)b:SetTheme(h)end}
+a:AddToggle{Name="Transparency",Description="Change The Background Transparency",Callback=function()b:ChangeBackgroundTransparance()end}
+a:AddToggle{Name="User info",Description="Show info about your account",Callback=function()b:UserInfo()end}
+
+
+if c.KeyboardEnabled then
+a:AddSection"Window"
+a:AddKeybind{Name="Minimize Window",Description="Change the window to minimize",Callback=function()b:Minimaze()end}
+a:AddKeybind{Name="Column Window",Description="Change the window to column",Callback=function()b:ColumnWindow()end}
+a:AddKeybind{Name="Close Window",Description="Close the Window",Default=Enum.KeyCode.LeftAlt,Callback=function()b:Close()end}
+end
+
+
+a:AddSection"Cloud Configs"
+
+a:AddButton{
+Name="Upload Config to Cloud",
+Description="Saves current config to server and gives an ID",
+Callback=function()
+local h=getCfgPath()
+if not isfile(h)then return notify("Error","No saved config to upload!")end
+if not g then return notify("Error","Your executor does not support HTTP requests!")end
+
+local i=readfile(h)
+
+local j=g{
+Url=f.."?action=upload",
+Method="POST",
+Headers={["Content-Type"]="application/json"},
+Body=i
+}
+
+if j.StatusCode==200 then
+local k,l=pcall(function()return d:JSONDecode(j.Body)end)
+if k and l.id then
+setclipboard(tostring(l.id))
+notify("Cloud Success","ID copied to clipboard: "..l.id,nil,5)
+else
+notify("Error","Invalid response from server")
+end
+elseif j.StatusCode==429 then
+notify("Cooldown","You can only upload a config once per 1 min!",nil,5)
+else
+notify("Error","Upload error: HTTP "..tostring(j.StatusCode))
+end
+end
+}
+
+a:AddInput{
+Name="Load Cloud Config",
+Description="Paste config ID",
+Callback=function(h)
+
+h=h:gsub("%s+","")
+if h==""or not tonumber(h)then return end
+
+if not g then return notify("Error","Your executor does not support HTTP requests!")end
+
+local i=g{
+Url=f.."?action=download&id="..h,
+Method="GET"
+}
+
+if i.StatusCode==200 and i.Body~=""then
+local j="cloud_"..h..".json"
+local k=b.saveFolder.."/"..j
+writefile(k,i.Body)
+
+b:UpdateConfigSelection(j)
+if cfgDrop then cfgDrop:UpdateOptions(b:GetConfigsList())end
+
+if b:LoadConfig(k)then
+notify("Cloud Success","Config ID "..h.." successfully loaded!",nil,4)
+else
+notify("Error","Error reading downloaded config.")
+end
+elseif i.StatusCode==404 then
+notify("Error","Config with ID "..h.." not found!")
+else
+notify("Error","Download error: HTTP "..tostring(i.StatusCode))
+end
+end
+}
+
+
+a:AddSection"Config Management"
+
+local h=a:AddDropdown{
+Name="Select Config",
+Description="Select a config to load or save",
+Options=b:GetConfigsList(),
+Default=b.saveFileName,
+Callback=function(h)if h then b:UpdateConfigSelection(h)end end
+}
+
+a:AddInput{
+Name="New Config Name",
+Description="Type name and press Enter",
+SaveConfig=true,
+Callback=function(i)
+if i~=""then
+b:UpdateConfigSelection(i)
+saveCfg()
+notify("Config Created","New config '"..i.."' saved!",nil,3)
+h:UpdateOptions(b:GetConfigsList())
+end
+end,
+}
+
+a:AddButton{Name="Save Config",Callback=function()saveCfg()notify("Success","Saved to "..b.saveFileName)end}
+
+a:AddButton{
+Name="Load Config",
+Callback=function()
+local i=getCfgPath()
+if not isfile(i)then return notify("Error","Config file not found!")end
+if b:LoadConfig(i)then notify("Success","Loaded: "..b.saveFileName)else notify("Error","Config is corrupted or empty! Re-save it.")end
+end
+}
+
+a:AddButton{
+Name="Delete Selected Config",
+Description="Permanently deletes the selected config file",
+Callback=function()
+if b.saveFileName=="forsaken.json"then return notify("Error","Cannot delete default config","Warn")end
+local i=getCfgPath()
+if isfile(i)then
+delfile(i)
+b:UpdateConfigSelection"forsaken.json"
+h:UpdateOptions(b:GetConfigsList())
+notify("Deleted","File "..b.saveFileName.." removed")
+end
+end
+}
+
+
+a:AddSection"Advanced Config"
+
+a:AddToggle{
+Name="Auto Load Config",
+Callback=function(i)
+local j=getCfgPath()
+local k={Toggles={}}
+
+if isfile(j)then
+local l,m=pcall(function()return d:JSONDecode(readfile(j))end)
+if l and type(m)=="table"then
+k=m
+k.Toggles=k.Toggles or{}
+end
+end
+
+k.Toggles["Auto Load Config"]=i
+if not isfolder(b.saveFolder)then makefolder(b.saveFolder)end
+
+local l,m=pcall(function()return d:JSONEncode(k)end)
+if l then writefile(j,m)end
+
+if i and isfile(j)then
+b:LoadConfig(j)
+notify("Success","Config "..b.saveFileName.." applied!",nil,3)
+end
+end,
+}
+
+a:AddToggle{
+Name="Auto Save Config",
+Callback=function(i)
+e=i
+if not i then return notify("Info","Auto Save disabled.",nil,3)end
+
+saveCfg()
+notify("Success","Auto Save enabled. Saving every 10s.",nil,3)
+
+task.spawn(function()
+while e do
+task.wait(10)
+if e then saveCfg()end
+end
+end)
+end
+}
+
+
+b:IsLoadConfig(getCfgPath())

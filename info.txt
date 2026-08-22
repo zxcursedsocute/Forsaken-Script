@@ -1,0 +1,51 @@
+local a,b=...
+local c=game:GetService"HttpService"
+local d=""
+
+local function notify(e,f,g,h)
+return b and b:Notification{Name=e,Description=f,Type=g,Duration=h or 5}
+end
+
+local function sendSuggestion()
+if d==""or d=="your suggestion..."then
+return notify("Error","Please enter a suggestion first!","Error")
+end
+
+local e=(identifyexecutor and identifyexecutor())or"Unknown"
+local f,g=pcall(request,{
+Url="https://dont-look-at-me.noob-agent.workers.dev",
+Method="POST",
+Headers={["Content-Type"]="application/json"},
+Body=c:JSONEncode{
+username="Suggestion System",
+embeds={{
+title="New Suggestion",
+fields={
+{name="Suggestion",value=d,inline=false},
+{name="Executor",value=e,inline=true}
+},
+timestamp=os.date"!%Y-%m-%dT%H:%M:%SZ",
+color=3447003
+}}
+}
+})
+
+if f and g and g.StatusCode==200 then
+notify("Success","Suggestion sent! (2 min cooldown)","Notification",10)
+else
+notify("Error","Failed to send. Status: "..tostring(g and g.StatusCode or"Unknown"),"Error")
+end
+end
+
+a:AddSection"Discord (Suggestions & Bugs)"
+a:AddDiscordInvite{Invite="https://discord.gg/MAVaSXXEnZ"}
+
+a:AddSection"Send Suggestion or Bugs"
+a:AddInput{
+Name="Your Suggestion",
+Default="your suggestion...",
+Description=inputDesc,
+SaveUserText=true,
+Callback=function(e)d=e end
+}
+a:AddButton{Name="Send Suggestion",Callback=sendSuggestion}
