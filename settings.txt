@@ -18,7 +18,7 @@ b:SaveConfig(b.saveFolder,b.saveFileName)
 end
 
 a:AddSection"Interface"
-a:AddDropdown{Name="Theme",Description="Change the interface theme",Options={'Two Time Femboy (by Mary)','Skitty (by Cozy)','Jane Doe (by Entity)',"Forest 2021","Cursed",'Darkness','Dark','White','Black'},Callback=function(h)b:SetTheme(h)end}
+a:AddDropdown{Name="Theme",Description="Change the interface theme",Options={'Two Time Femboy (by Mary)','Skitty (by Cozy)','Kill Everyone (by Jinx)','Jane Doe (by Entity)',"Forest 2021","Cursed",'Darkness','Dark','White','Black'},Callback=function(h)b:SetTheme(h)end}
 a:AddToggle{Name="Transparency",Description="Change The Background Transparency",Callback=function()b:ChangeBackgroundTransparance()end}
 a:AddToggle{Name="User info",Description="Show info about your account",Callback=function()b:UserInfo()end}
 
