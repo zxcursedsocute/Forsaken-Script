@@ -1,0 +1,73 @@
+local a=(cloneref or clonereference or function(a)return a end)
+
+local b=a(game)
+local c=a(b:GetService"Lighting")
+local d=a(b:GetService"Workspace")
+
+c.GlobalShadows=false
+c.EnvironmentDiffuseScale=0
+c.EnvironmentSpecularScale=0
+c.FogEnd=1e10
+c.Brightness=0.8
+c.OutdoorAmbient=Color3.fromRGB(50,50,50)
+
+settings().Rendering.QualityLevel=Enum.QualityLevel.Level01
+
+for e,f in ipairs(c:GetChildren())do
+if f:IsA"Sky"then
+f:Destroy()
+end
+end
+
+local e=Instance.new"Sky"
+e.Name="NoTextureSky"
+e.SkyboxBk,e.SkyboxDn,e.SkyboxFt="","",""
+e.SkyboxLf,e.SkyboxRt,e.SkyboxUp="","",""
+e.Parent=c
+
+local f=d.Terrain
+f.WaterWaveSize=0
+f.WaterWaveSpeed=0
+f.WaterReflectance=0
+f.WaterTransparency=0
+
+local function isCharacter(g)
+local h=g.Parent
+while h and h~=b do
+if(h:IsA"Model"and h:FindFirstChildOfClass"Humanoid")or h:IsA"Accessory"then
+return true
+end
+h=h.Parent
+end
+return false
+end
+
+local function optimizeObject(g)
+local h=isCharacter(g)
+
+if not h then
+if g:IsA"Texture"or g:IsA"Decal"or g:IsA"SurfaceAppearance"then
+g:Destroy()
+elseif g:IsA"SpecialMesh"then
+g.TextureId=""
+end
+end
+
+if g:IsA"ParticleEmitter"or g:IsA"Trail"or g:IsA"Beam"or g:IsA"Smoke"or g:IsA"Fire"or g:IsA"Sparkles"then
+g.Enabled=false
+elseif g:IsA"PointLight"or g:IsA"SurfaceLight"or g:IsA"SpotLight"then
+g.Enabled=false
+elseif g:IsA"BasePart"then
+g.Material=Enum.Material.SmoothPlastic
+g.Reflectance=0
+end
+end
+
+for g,h in ipairs(d:GetDescendants())do
+optimizeObject(h)
+end
+
+d.DescendantAdded:Connect(function(g)
+task.wait()
+optimizeObject(g)
+end)
