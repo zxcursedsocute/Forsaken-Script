@@ -1,0 +1,293 @@
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local gui = loadstring(game:HttpGet("https://raw.githubusercontent.com/zxcursedsocute/UI-Library/refs/heads/main/Mini5"))()
+local windows = gui.CreateWindow({
+    Name = "Cursedsaken Auto Generator",
+    Description = "Open Source",
+    Size = 620,
+    Version = "Generator Update",
+    Theme = "Cursed"
+})
+local CategoryMain = windows:AddCategory("Main")
+local GenSection = CategoryMain:AddTab("Generators", "Generator")
+
+local Config = {
+    StartDelay = 1.5,
+    ActionDelay = 0.05,  -- Flow: delay per cell
+    ConnectDelay = 1.0,  -- Connect: delay per pair
+    GearDelay = 0.03,    -- Gear: delay per turn
+}
+
+-- New generator minigames (Flow / Gear / Lock / Connect)
+local MinigameSolver = {
+    Enabled = false,
+    ManualEnabled = false,
+    AutoEnabled = false,
+    Generation = 0,
+    LockBoard = nil,
+    Installed = false,
+}
+
+local MinigameFolder = ReplicatedStorage.Systems.Player.Game.Minigames
+local FlowBoardModule = require(ReplicatedStorage.Modules.Minigames.FlowBoard)
+local LockBoardModule = require(ReplicatedStorage.Modules.Minigames.LockBoard)
+local FlowInputModule = require(MinigameFolder.FlowClientMinigame.FlowInput)
+local GearInputModule = require(MinigameFolder.GearClientMinigame.GearInput)
+local LockInputModule = require(MinigameFolder.LockClientMinigame.LockInput)
+local ConnectInputModule = require(MinigameFolder.ConnectClientMinigame.ConnectInput)
+
+local function solverDelay()
+    return math.max(0, Config.ActionDelay or 0.05)
+end
+
+local function connectSolverDelay()
+    return math.max(0, Config.ConnectDelay or 1)
+end
+
+local function solverIsEnabled()
+    return MinigameSolver.ManualEnabled or MinigameSolver.AutoEnabled
+end
+
+local function stillSolving(_, object)
+    return solverIsEnabled() and object and not object.Ended
+end
+
+local function waitForSolver(object)
+    -- Input objects are registered even while the toggle is disabled. This
+    -- allows enabling Generator Solver after PuzzleUI has already opened.
+    while object and not object.Ended and not solverIsEnabled() do
+        task.wait(0.05)
+    end
+    if not (object and not object.Ended and solverIsEnabled()) then return false end
+    local started = os.clock()
+    while object and not object.Ended and solverIsEnabled() and os.clock() - started < Config.StartDelay do
+        task.wait(0.05)
+    end
+    return object and not object.Ended and solverIsEnabled()
+end
+
+-- Finds non-overlapping paths. The server does not require every empty cell
+-- to be filled, therefore shortest disjoint paths are enough.
+local function solveFlowBoard(board)
+    local size, pairMap = board.Size, board.Pairs
+    local occupied, answer = {}, {}
+    local directions = { {-1, 0}, {1, 0}, {0, -1}, {0, 1} }
+    local endpointOwner = {}
+
+    for color, pair in pairs(pairMap) do
+        endpointOwner[pair[1]], endpointOwner[pair[2]] = color, color
+    end
+
+    local remaining = {}
+    for color in pairs(pairMap) do table.insert(remaining, color) end
+
+    local function candidates(color, limit)
+        local pair = pairMap[color]
+        local from, target = pair[1], pair[2]
+        local results, path, seen = {}, {from}, {[from] = true}
+
+        local function distance(cell)
+            local r, c = FlowBoardModule.ToRowCol(size, cell)
+            local tr, tc = FlowBoardModule.ToRowCol(size, target)
+            return math.abs(r - tr) + math.abs(c - tc)
+        end
+
+        local function walk(cell)
+            if #results >= limit then return end
+            if cell == target then
+                table.insert(results, table.clone(path))
+                return
+            end
+            local row, col = FlowBoardModule.ToRowCol(size, cell)
+            local nextCells = {}
+            for _, d in ipairs(directions) do
+                local nr, nc = row + d[1], col + d[2]
+                if nr >= 1 and nr <= size and nc >= 1 and nc <= size then
+                    local n = FlowBoardModule.ToIndex(size, nr, nc)
+                    local owner = endpointOwner[n]
+                    if not seen[n] and not occupied[n]
+                        and (not owner or (owner == color and n == target)) then
+                        table.insert(nextCells, n)
+                    end
+                end
+            end
+            table.sort(nextCells, function(a, b) return distance(a) < distance(b) end)
+            for _, n in ipairs(nextCells) do
+                seen[n] = true; table.insert(path, n)
+                walk(n)
+                path[#path] = nil; seen[n] = nil
+                if #results >= limit then break end
+            end
+        end
+
+        walk(from)
+        table.sort(results, function(a, b) return #a < #b end)
+        return results
+    end
+
+    local function search(colors)
+        if #colors == 0 then return true end
+        local bestIndex, bestPaths
+        for i, color in ipairs(colors) do
+            local list = candidates(color, 300)
+            if #list == 0 then return false end
+            if not bestPaths or #list < #bestPaths then
+                bestIndex, bestPaths = i, list
+            end
+        end
+
+        local color = colors[bestIndex]
+        local nextColors = table.clone(colors)
+        table.remove(nextColors, bestIndex)
+        for _, path in ipairs(bestPaths) do
+            for _, cell in ipairs(path) do occupied[cell] = true end
+            answer[color] = path
+            if search(nextColors) then return true end
+            answer[color] = nil
+            for _, cell in ipairs(path) do occupied[cell] = nil end
+        end
+        return false
+    end
+
+    return search(remaining) and answer or nil
+end
+
+local function installMinigameHooks()
+    if MinigameSolver.Installed then return end
+    MinigameSolver.Installed = true
+
+    local oldLockBoardNew = LockBoardModule.new
+    LockBoardModule.new = function(...)
+        local board = oldLockBoardNew(...)
+        MinigameSolver.LockBoard = board
+        return board
+    end
+
+    local oldFlowNew = FlowInputModule.new
+    FlowInputModule.new = function(board, renderer, callbacks)
+        local object = oldFlowNew(board, renderer, callbacks)
+        local token = MinigameSolver.Generation
+        task.spawn(function()
+            if not waitForSolver(object) then return end
+            task.wait(solverDelay())
+            local paths = solveFlowBoard(board)
+            if not paths then
+                warn('[Generator Solver] Flow solution was not found')
+                return
+            end
+            for color, path in pairs(paths) do
+                if not stillSolving(token, object) then return end
+                local drawing = board:Begin(path[1])
+                renderer:Render()
+                task.wait(solverDelay())
+                for index = 2, #path do
+                    if not stillSolving(token, object) then return end
+                    board:Step(drawing, path[index], 0)
+                    renderer:Render()
+                    task.wait(solverDelay())
+                end
+                board:Release(drawing, true)
+                renderer:Render()
+                task.wait(solverDelay())
+            end
+            if stillSolving(token, object) and board:IsSolved() then
+                object:__finish()
+                callbacks.OnSolved()
+            end
+        end)
+        return object
+    end
+
+    local oldConnectNew = ConnectInputModule.new
+    ConnectInputModule.new = function(board, renderer, callbacks)
+        local object = oldConnectNew(board, renderer, callbacks)
+        local token = MinigameSolver.Generation
+        task.spawn(function()
+            if not waitForSolver(object) then return end
+            task.wait(connectSolverDelay())
+            for blob in pairs(board.Blobs) do
+                if not stillSolving(token, object) then return end
+                if not board:GetLink(blob) then
+                    local mate = board:GetMate(blob)
+                    if mate then
+                        board:Connect(blob, mate)
+                        renderer:Render()
+                        task.wait(connectSolverDelay())
+                    end
+                end
+            end
+            if stillSolving(token, object) and board:IsSolved() then
+                object:__finish()
+                callbacks.OnSolved()
+            end
+        end)
+        return object
+    end
+
+    local oldGearNew = GearInputModule.new
+    GearInputModule.new = function(getCenter, callbacks, enabled)
+        local object = oldGearNew(getCenter, callbacks, enabled)
+        local token = MinigameSolver.Generation
+        task.spawn(function()
+            if not waitForSolver(object) then return end
+            task.wait(math.max(0.55, solverDelay()))
+            for _ = 1, 100 do
+                if not stillSolving(token, object) then return end
+                callbacks.OnTurn(90)
+                task.wait(math.max(0, Config.GearDelay or 0.03))
+            end
+        end)
+        return object
+    end
+
+    local oldLockNew = LockInputModule.new
+    LockInputModule.new = function(ui, callbacks)
+        local object = oldLockNew(ui, callbacks)
+        local board = MinigameSolver.LockBoard
+        local token = MinigameSolver.Generation
+        task.spawn(function()
+            if not waitForSolver(object) then return end
+            while stillSolving(token, object) and board and not board:IsBroken() do
+                local now = workspace:GetServerTimeNow()
+                if board:IsOnTarget(board:AngleAt(now)) then
+                    callbacks.OnPress()
+                    task.wait(math.max(0.08, solverDelay()))
+                else
+                    RunService.Heartbeat:Wait()
+                end
+            end
+        end)
+        return object
+    end
+end
+
+pcall(installMinigameHooks)
+
+
+GenSection:AddSection("Auto Generator")
+GenSection:AddToggle({
+    Name = "Auto Generator",
+    Callback = function(enabled)
+        MinigameSolver.ManualEnabled = enabled
+        MinigameSolver.Enabled = enabled
+        MinigameSolver.Generation += 1
+    end
+})
+
+GenSection:AddSlider({
+    Name = "Start Delay (seconds)", Min = 0, Max = 5, Default = 1.5,
+    Callback = function(value) Config.StartDelay = value end
+})
+GenSection:AddSlider({
+    Name = "Flow Cell Speed (ms)", Min = 0, Max = 250, Default = 50,
+    Callback = function(value) Config.ActionDelay = value / 1000 end
+})
+GenSection:AddSlider({
+    Name = "Connect Pair Delay (ms)", Min = 100, Max = 3000, Default = 1000,
+    Callback = function(value) Config.ConnectDelay = value / 1000 end
+})
+GenSection:AddSlider({
+    Name = "Gear Turn Speed (ms)", Min = 0, Max = 150, Default = 30,
+    Callback = function(value) Config.GearDelay = value / 1000 end
+})
