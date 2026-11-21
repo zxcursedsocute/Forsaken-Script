@@ -1,0 +1,38 @@
+local a=game:GetService"HttpService"
+local b=game:GetService"TeleportService"
+local c=game:GetService"Players"
+
+local d=c.LocalPlayer
+local e=game.PlaceId
+local f=game.JobId
+
+local g="https://games.roblox.com/v1/games/"..e.."/servers/Public?sortOrder=Desc&limit=100"
+
+local function getServers(h)
+local i=g..(h and"&cursor="..h or"")
+local j=game:HttpGet(i)
+return a:JSONDecode(j)
+end
+
+local h
+local i
+
+repeat
+local j=getServers(i)
+
+if j and j.data then
+for k,l in ipairs(j.data)do
+
+if l.playing<l.maxPlayers and l.id~=f then
+h=l
+break
+end
+end
+end
+
+i=j and j.nextPageCursor
+until h or not i
+
+if h then
+b:TeleportToPlaceInstance(e,h.id,d)
+end
